@@ -1,20 +1,27 @@
 package com.cyberone.cams.crawler.core;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
-import org.json.JSONObject;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 import org.jsoup.Connection;
 import org.jsoup.Connection.Response;
 import org.jsoup.HttpStatusException;
@@ -75,10 +82,15 @@ public class WebCrawlerSchedule {
 	    private long lLastTime;
 	    private long millis;    
 		
-		private Map<String, String> data;
+		private String monitorId;
+		private String host;
+		
+		private Date logTime;
 		
 	    public WorkerThread(Map<String, String> data) {
-	    	this.data = data;
+	    	this.monitorId = data.get("_id");
+	    	this.host = data.get("host");
+	    	this.logTime = new Date();
 	    }
 
 	    @Override
@@ -86,17 +98,42 @@ public class WebCrawlerSchedule {
 	        
 	    	lLastTime = System.currentTimeMillis();
 	    	
+	    	logger.debug("WorkerThread[{}]:", monitorId);
+	    	
 	    	try {
 	    		
-	    		logger.debug("WorkerThread: " + data.toString());
-	    		getForgeryOriginalData(data.get("_id"), data.get("host"));
+	    		StringBuffer sBuff = new StringBuffer();
 	    		
+	    		File file = new File(CAMS_HOME + "forgery/" + monitorId + "/original/urlPage.html");
+	    		logger.debug("file.length().length(): {}", file.length());
+	    		
+	    		FileReader reader = new FileReader(file);
+	    		try (BufferedReader br = new BufferedReader(reader)) {
+	    			String  line = null;
+	    			while ((line = br.readLine()) != null) {
+	    				sBuff.append(line).append("\n");
+    				}
+	    		} catch (IOException e) {
+	    			e.printStackTrace();
+	    		}
+
+	    		JSONParser parser = new JSONParser();
+	    		Object obj = parser.parse(new FileReader(CAMS_HOME + "forgery/" + monitorId + "/original/imageHash.json"));
+				JSONObject jsonObject = (JSONObject) obj;	    		
+	    		
+				CrawlingInfo originalInfo = new CrawlingInfo(sBuff.toString(), (HashMap)jsonObject, monitorId);
+
+	    		//imageCount
+				//htmlLength
+				//addImage
+				//changeImage
+				//deleteImage
 	    		
 	    	} catch(Exception e) {
 	    	}
 	    	
             millis = System.currentTimeMillis() - lLastTime;
-            logger.debug("WorkerThread End... [소요시간: " + millis + "]");
+            logger.debug("WorkerThread[{}][소요시간: {}]", monitorId, millis);
 
 	    }
 
@@ -106,15 +143,15 @@ public class WebCrawlerSchedule {
 	    }
 	    
 		@SuppressWarnings("unchecked")
-		public void getForgeryOriginalData(String strMonitorId, String strHost) throws Exception {
+		public void getForgeryData(String monitorId, String host) throws Exception {
 
-			if (StringUtil.isBlank(strHost)) {
+			if (StringUtil.isBlank(host)) {
 				return;
 			}
 			
 			try {
-	            Connection conn = Jsoup.connect(strHost);
-	            Document html = conn.get(); // conn.post();
+	            Connection conn = Jsoup.connect(host);
+	            Document html = conn.get();
 	            Response res = conn.response();
 	            URL url = res.url();
 	            
@@ -123,34 +160,28 @@ public class WebCrawlerSchedule {
 	            	strProtocol = "https://";
 	            }
 				
-	            strHost = strProtocol + url.getHost();
-	            System.out.println(strHost);
+	            host = strProtocol + url.getHost();
 
 	            Elements allEl = html.getAllElements();
 	            for (Element el : allEl) {
 	            	if (el.hasAttr("src")) {
 	            		if (el.attr("src").indexOf("http://") < 0 && el.attr("src").indexOf("https://") < 0) {
-		            		el.attr("src", strHost + el.attr("src"));
+		            		el.attr("src", host + el.attr("src"));
 		            	}
 	            	}
 	            	if (el.normalName().equals("link")) {
 	            		if (el.attr("href").indexOf("http://") < 0 && el.attr("href").indexOf("https://") < 0) {
-		            		el.attr("href", strHost + el.attr("href"));
+		            		el.attr("href", host + el.attr("href"));
 		            	}
 	            	}
 	            }
 	            
-	            File monitorDir = new File(CAMS_HOME + "forgery/" + strMonitorId);
-	            if (!monitorDir.exists()) {
-	            	monitorDir.mkdir();
+	            File logDir = new File(CAMS_HOME + "forgery/" + monitorId + "/" + (new SimpleDateFormat("yyyyMMddHHmm")).format(logTime));
+	            if (!logDir.exists()) {
+	            	logDir.mkdir();
 	            }
 
-	            File originalDir = new File(CAMS_HOME + "forgery/" + strMonitorId + "/original");
-	            if (!originalDir.exists()) {
-	            	originalDir.mkdir();
-	            }
-
-	            FileWriter file = new FileWriter(originalDir.getAbsolutePath() + "/" + "urlPage.html");
+	            FileWriter file = new FileWriter(logDir.getAbsolutePath() + "/" + "urlPage.html");
 	    		file.write(html.html());
 	    		file.flush();
 	    		file.close();
@@ -161,10 +192,9 @@ public class WebCrawlerSchedule {
 	            	if (el.hasAttr("src")) {
 		            	String strSrc = el.attr("src");
 		            	if (el.normalName().equals("img")) {
-		            		String strFileName = strSrc.replace(strHost + "/", "").replace("/", "_");
-		            		el.attr("src", strFileName);
+		            		String strFileName = strSrc.replace(host + "/", "").replace("/", "_");
 		            		
-		                	File fileImage = new File(originalDir.getAbsolutePath() + "/" + strFileName);
+		                	File fileImage = new File(logDir.getAbsolutePath() + "/" + strFileName);
 		                	FileUtils.copyURLToFile(new URL(strSrc), fileImage);
 		                	
 		                	MessageDigest mdMD5 = MessageDigest.getInstance("MD5");
@@ -180,7 +210,21 @@ public class WebCrawlerSchedule {
 	            	}
 	            }
 	            
-	            file = new FileWriter(originalDir.getAbsolutePath() + "/" + "imageHash.json");
+	    		Set<String> keys = jsonObj.keySet();
+	    		for (String key : keys) {
+
+
+	    			
+	    			
+	    			
+	    			
+	    			
+	    		}
+	            
+	            
+	            
+	            
+	            file = new FileWriter(logDir.getAbsolutePath() + "/" + "imageHash.json");
 	    		file.write(jsonObj.toString());
 	    		file.flush();
 	    		file.close();
