@@ -9,9 +9,11 @@ import java.io.IOException;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.io.FileUtils;
@@ -304,11 +306,6 @@ public class ForgeryDetection implements Runnable {
             	logDir.mkdir();
             }
 
-            FileWriter fw = new FileWriter(logDir.getAbsolutePath() + "/" + "urlPage.html");
-            fw.write(doc.html());
-            fw.flush();
-            fw.close();
-            
             JSONObject jsonObj = new JSONObject();
             
             for (Element el : allEl) {
@@ -324,16 +321,19 @@ public class ForgeryDetection implements Runnable {
 		            		
 		                	File fileImage = new File(logDir.getAbsolutePath() + "/" + strFileName);
 		                	FileUtils.copyURLToFile(new URL(src), fileImage);
-		                	
-		                	MessageDigest mdMD5 = MessageDigest.getInstance("MD5");
-		                	mdMD5.update(IOUtils.toByteArray(new FileInputStream(fileImage)));
-		                	byte[] md5Hash = mdMD5.digest();
-		                	StringBuilder hexMD5hash = new StringBuilder();
-		                    for(byte b : md5Hash) {
-		                        String hexString = String.format("%02x", b);
-		                        hexMD5hash.append(hexString);
-		                    }        
-		                    jsonObj.put(strFileName, hexMD5hash.toString());
+
+		                	try (FileInputStream fis = new FileInputStream(fileImage)) {
+			                	MessageDigest mdMD5 = MessageDigest.getInstance("MD5");
+			                	mdMD5.update(IOUtils.toByteArray(fis));
+			                	byte[] md5Hash = mdMD5.digest();
+			                	StringBuilder hexMD5hash = new StringBuilder();
+			                    for(byte b : md5Hash) {
+			                        String hexString = String.format("%02x", b);
+			                        hexMD5hash.append(hexString);
+			                    }
+			                    
+			                    jsonObj.put(strFileName, hexMD5hash.toString());
+		                	}
 		            	}
 	            	}
             	} catch (Exception e) {
@@ -343,13 +343,31 @@ public class ForgeryDetection implements Runnable {
             
     		File file = new File(logDir.getAbsolutePath() + "/" + "urlPage.html");
 
+            Map<String, Boolean> dtctMap = new HashMap<String, Boolean>();
+
+            Map<String, Object> logMap = new HashMap<String, Object>();
+            Map<String, Object> eventMap = new HashMap<String, Object>();
+
+    		
+            FileWriter fw = new FileWriter(logDir.getAbsolutePath() + "/" + "urlPage.html");
+            fw.write(doc.html());
+            fw.flush();
+            fw.close();
+            
     		logger.debug("\n========================================================================");
             logger.debug("HtmlDocSize: {} / {} => {}", doc.html().length(), originalInfo.getHtmlLength(), (Math.abs(doc.html().length() - originalInfo.getHtmlLength())*100F)/originalInfo.getHtmlLength());
             logger.debug("ImageCount: {} / {} => {}", jsonObj.size(), originalInfo.getImageCount());
             
+            if (jsonObj.size() != originalInfo.getImageCount()) {
+            	dtctMap.put("2", true); //image count
+            }
+            
             JSONObject addImageJson = new JSONObject();
             JSONObject changeImageJson = new JSONObject();
             JSONObject deleteImageJson = new JSONObject();
+            
+            List<JSONObject> imageDetectList = new ArrayList<JSONObject>();
+            
             
             Iterator<String> it = jsonObj.keySet().iterator();
             while (it.hasNext()) {
@@ -361,13 +379,56 @@ public class ForgeryDetection implements Runnable {
     			} else if (!imageHash.equals(jsonObj.get(key))) { //change image
     				changeImageJson.put(key, jsonObj.get(key));
     			} else { //same image
+    				File imgFile = new File(logDir.getAbsolutePath() + "/" + key);
+    				imgFile.delete();
+    				
     				originalInfo.deleteImageHash(key);
     				it.remove();
     			}
             }            
-    		
     		deleteImageJson = (JSONObject)originalInfo.getImageHash();
+
+    		it = addImageJson.keySet().iterator();
+    		while (it.hasNext()) {
+    			String key = it.next();
+    			JSONObject json = new JSONObject();
+    			json.put("kind", "add");
+    			json.put("filename", key);
+    			json.put("hash", addImageJson.get(key));
+    			imageDetectList.add(json);
+    			
+    			dtctMap.put("3", true); //image add
+    		}
     		
+    		it = changeImageJson.keySet().iterator();
+    		while (it.hasNext()) {
+    			String key = it.next();
+    			JSONObject json = new JSONObject();
+    			json.put("kind", "change");
+    			json.put("filename", key);
+    			json.put("hash", changeImageJson.get(key));
+    			imageDetectList.add(json);
+    			
+    			dtctMap.put("4", true); //image change
+    		}
+
+    		it = deleteImageJson.keySet().iterator();
+    		while (it.hasNext()) {
+    			String key = it.next();
+    			JSONObject json = new JSONObject();
+    			json.put("kind", "delete");
+    			json.put("filename", key);
+    			json.put("hash", deleteImageJson.get(key));
+    			imageDetectList.add(json);
+    			
+    			dtctMap.put("5", true); //image delete
+    		}
+
+    		//text match
+    		
+    		if (dtctMap.keySet().size() == 0) {
+    			logDir.delete();
+    		}
     		
     		//imageCount
 			//htmlLength

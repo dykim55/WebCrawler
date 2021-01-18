@@ -9,8 +9,12 @@ import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import com.cyberone.cams.crawler.common.Mgr;
+import com.cyberone.cams.crawler.repository.ObjectRepository;
 
 @Component 
 public class WebCrawlerSchedule { 
@@ -20,6 +24,9 @@ public class WebCrawlerSchedule {
     private long lLastTime;
     private long millis;    
 
+	@Autowired
+	private ObjectRepository objectRepository;
+    
     @Scheduled(cron = "0 0/1 * * * ?")
     public void WebCrawlingJob() { 
 
@@ -28,6 +35,20 @@ public class WebCrawlerSchedule {
         try {
             logger.debug("WebCrawlingJob Start...");
             lLastTime = System.currentTimeMillis();
+            
+    		String strJson = "{"
+    				+ "\"query\": {"
+    				+ " 	\"bool\": {"
+    				+ "     	\"must\": ["
+    				+ "				{\"term\": { \""+Mgr._ID.getName()+"\": \"" + "iDyk22wBt077b5Uc-ixT" +"\" }}"
+    				+ " 		]"				
+    				+ " 	}"
+    				+ "}"
+    				+ "}";				
+            
+            
+            objectRepository.searchByJsonQuery(strJson);
+            
             
             List<Map<String, Object>> dataList = generateData();
             
@@ -58,7 +79,7 @@ public class WebCrawlerSchedule {
 		hMap.put("_id", "3333333333");
 		hMap.put("host", "https://edu.kcga.go.kr/kcgrc/index0.jsp");
 		dataList.add(hMap);
-
+/*
 		hMap = new HashMap<String, Object>();
 		hMap.put("_id", "1111111111");
 		hMap.put("host", "http://www.kcg.go.kr/kcg/main.do");
@@ -98,7 +119,7 @@ public class WebCrawlerSchedule {
 		hMap.put("_id", "9999999999");
 		hMap.put("host", "http://www.kcg.go.kr/jejucgh/main.do");
 		dataList.add(hMap);
-
+*/
 		return dataList;
 	}
 	
